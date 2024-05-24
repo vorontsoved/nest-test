@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	uri = "nats://localhost:4225"
+	uri = "nats://nats:4222"
 )
 
 func main() {

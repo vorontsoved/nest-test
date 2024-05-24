@@ -1,6 +1,6 @@
-module nats
+module consumer
 
-go 1.22.0
+go 1.22
 
 require (
 	github.com/nats-io/nats.go v1.35.0
