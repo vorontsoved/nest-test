@@ -11,7 +11,7 @@ services:
     hostname: nats-server
   api:
     build:
-      context: "./producer"
+      context: "./publisher"
     links:
       - nats
     environment:
@@ -22,7 +22,7 @@ services:
       - "8080:8080"
   worker:
     build:
-      context: "./consumer"
+      context: "./subscriber"
     links:
       - nats
     environment:
