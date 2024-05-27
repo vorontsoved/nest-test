@@ -1,47 +1,72 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"time"
-
 	"github.com/nats-io/nats.go"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
-func healthz(w http.ResponseWriter, r *http.Request) {
-	fmt.Println(w, "OK")
-}
-
 func main() {
-	uri := os.Getenv("NATS_URI")
-	var err error
-	var nc *nats.Conn
+	uri := "nats://localhost:4222"
 
-	for i := 0; i < 5; i++ {
-		nc, err = nats.Connect(uri)
-		if err == nil {
-			break
-		}
-
-		fmt.Println("Waiting before connecting to NATS at:", uri)
-		time.Sleep(1 * time.Second)
-	}
+	// Установка соединения с сервером NATS
+	nc, err := nats.Connect(uri)
 	if err != nil {
-		log.Fatal("Error establishing connection to NATS:", err)
-	}
-	fmt.Println("Connected to NATS at:", nc.ConnectedUrl())
-	nc.Subscribe("tasks", func(m *nats.Msg) {
-		fmt.Println("Got task request on:", m.Subject)
-		nc.Publish(m.Reply, []byte("Done!"))
-	})
-
-	fmt.Println("Worker subscribed to 'tasks' for processing requests...")
-	fmt.Println("Server listening on port 8181...")
-
-	http.HandleFunc("/healthz", healthz)
-	if err := http.ListenAndServe(":8181", nil); err != nil {
 		log.Fatal(err)
 	}
+	defer nc.Close()
+
+	// Создание JetStream контекста
+	js, err := nc.JetStream(nats.PublishAsyncMaxPending(256))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Создание контекста с возможностью отмены
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // Вызываем cancel() после завершения работы горутины
+
+	js.AddStream(&nats.StreamConfig{
+		Name:      "123",
+		Subjects:  []string{"123.*"},
+		Retention: nats.WorkQueuePolicy,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Запуск горутины для асинхронного получения сообщений
+	go func() {
+		// Подписываемся на тему и получаем сообщения в реальном времени
+		sub, err := js.Subscribe("123.TTTopic", func(msg *nats.Msg) {
+			msg.Ack()
+			m, err := msg.Metadata()
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("Это первый \n")
+			fmt.Printf("Топик: %v\n", m.Stream)
+			fmt.Printf("Группа: %v\n", msg.Subject)
+			fmt.Printf("Получено новое сообщение: %v\n", string(msg.Data))
+		}, nats.Durable("asss"), nats.DeliverNew())
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer sub.Unsubscribe()
+
+		// Ожидание сигнала завершения или отмены контекста
+		<-ctx.Done()
+		fmt.Println("Горутина получения сообщений завершает работу")
+	}()
+
+	// Ожидание сигнала завершения программы
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	fmt.Println("Программа завершает работу")
 }
